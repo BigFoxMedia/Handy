@@ -68,7 +68,20 @@ Linux (amd64 `.deb`) from the dev container:
   --config src-tauri/tauri.fork.conf.json
 ```
 
-Windows (unsigned NSIS installer) is built by
-`.github/workflows/fork-build.yml` on `windows-latest`; it uses the same fork
-config to disable updater artifacts and make the Windows signing command a
-no-op. Upstream's signed/Azure build is unchanged.
+Windows installers are built by `.github/workflows/fork-build.yml` on
+`windows-latest`; it uses the same fork config to disable updater artifacts and
+make the Windows signing command a no-op. Upstream's signed/Azure build is
+unchanged.
+
+The 0.10.1 fork build produced both installer formats (unsigned):
+
+```text
+Handy_0.10.1_x64-setup.exe   # NSIS
+sha256 968694fa1954994ffa23e6f39f37630041c886479cc2152a779fbe0212c63d96
+
+Handy_0.10.1_x64_en-US.msi   # MSI
+sha256 1ffa38a96285385370296b3fa4ae1271eb9399cc0b01ac68fb246e1badf385d4
+```
+
+Because they are unsigned, Windows SmartScreen may warn on first launch.
+
