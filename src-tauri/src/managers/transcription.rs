@@ -1277,6 +1277,49 @@ fn finish_text(outcome: RunOutcome, settings: &AppSettings) -> String {
     )
 }
 
+/// Finish text produced by a remote transcription. It runs the same output
+/// filters as the local path (Chinese script conversion, custom-word
+/// correction, filler removal, normalization) without a local model setup.
+pub(crate) fn finish_remote_text(
+    raw: String,
+    settings: &AppSettings,
+    language_hint: Option<String>,
+) -> String {
+    let output_language = if settings.translate_to_english {
+        OutputLanguageEvidence::TranslatedToEnglish
+    } else if let Some(language) = language_hint {
+        OutputLanguageEvidence::UserSelected(language)
+    } else {
+        OutputLanguageEvidence::Unknown
+    };
+
+    // The remote request already sent custom words as a prompt.
+    post_process_transcription_text(raw, settings, true, &output_language, &[])
+}
+
+/// The language label a remote result gets for history/UI.
+pub(crate) fn remote_language_decision(settings: &AppSettings) -> LanguageDecision {
+    if settings.translate_to_english {
+        return LanguageDecision {
+            language: Some("en".to_string()),
+            source: LanguageSource::Selected,
+        };
+    }
+
+    let language = settings.selected_language.trim();
+    if language.is_empty() || language == "auto" {
+        LanguageDecision {
+            language: None,
+            source: LanguageSource::Model,
+        }
+    } else {
+        LanguageDecision {
+            language: Some(language.to_string()),
+            source: LanguageSource::Selected,
+        }
+    }
+}
+
 /// How every run of one transcription (each chunk, or a whole clip) is
 /// configured on the loaded model, and what post-processing needs to know.
 struct RunSetup {

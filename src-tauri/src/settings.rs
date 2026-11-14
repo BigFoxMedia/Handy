@@ -121,6 +121,19 @@ pub struct PostProcessProvider {
     pub api_format: PostProcessApiFormat,
 }
 
+/// A remote OpenAI-compatible speech-to-text endpoint.
+#[derive(Serialize, Deserialize, Debug, Clone, Type)]
+pub struct TranscriptionProvider {
+    pub id: String,
+    pub label: String,
+    pub base_url: String,
+    #[serde(default)]
+    pub allow_base_url_edit: bool,
+    /// Path appended to `base_url` for the health-check GET. None = "/models".
+    #[serde(default)]
+    pub health_endpoint: Option<String>,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Type)]
 #[serde(rename_all = "lowercase")]
 pub enum OverlayPosition {
@@ -497,6 +510,16 @@ pub struct AppSettings {
     pub post_process_prompts: Vec<LLMPrompt>,
     #[serde(default)]
     pub post_process_selected_prompt_id: Option<String>,
+    #[serde(default)]
+    pub remote_transcription_enabled: bool,
+    #[serde(default = "default_remote_transcription_provider_id")]
+    pub remote_transcription_provider_id: String,
+    #[serde(default = "default_remote_transcription_providers")]
+    pub remote_transcription_providers: Vec<TranscriptionProvider>,
+    #[serde(default = "default_remote_transcription_api_keys")]
+    pub remote_transcription_api_keys: SecretMap,
+    #[serde(default = "default_remote_transcription_models")]
+    pub remote_transcription_models: HashMap<String, String>,
     #[serde(default)]
     pub mute_while_recording: bool,
     #[serde(default)]
@@ -887,6 +910,87 @@ fn default_typing_tool() -> TypingTool {
     TypingTool::Auto
 }
 
+fn default_remote_transcription_provider_id() -> String {
+    "custom".to_string()
+}
+
+fn default_remote_transcription_providers() -> Vec<TranscriptionProvider> {
+    vec![
+        TranscriptionProvider {
+            id: "openai".to_string(),
+            label: "OpenAI".to_string(),
+            base_url: "https://api.openai.com/v1".to_string(),
+            allow_base_url_edit: false,
+            health_endpoint: None,
+        },
+        TranscriptionProvider {
+            id: "groq".to_string(),
+            label: "Groq".to_string(),
+            base_url: "https://api.groq.com/openai/v1".to_string(),
+            allow_base_url_edit: false,
+            health_endpoint: None,
+        },
+        TranscriptionProvider {
+            id: "speaches".to_string(),
+            label: "Speaches".to_string(),
+            base_url: String::new(),
+            allow_base_url_edit: true,
+            health_endpoint: None,
+        },
+        TranscriptionProvider {
+            id: "faster-whisper".to_string(),
+            label: "faster-whisper-server".to_string(),
+            base_url: String::new(),
+            allow_base_url_edit: true,
+            health_endpoint: None,
+        },
+        TranscriptionProvider {
+            id: "localai".to_string(),
+            label: "LocalAI".to_string(),
+            base_url: String::new(),
+            allow_base_url_edit: true,
+            health_endpoint: None,
+        },
+        TranscriptionProvider {
+            id: "custom".to_string(),
+            label: "Custom (OpenAI-compatible)".to_string(),
+            base_url: String::new(),
+            allow_base_url_edit: true,
+            health_endpoint: None,
+        },
+    ]
+}
+
+fn default_remote_transcription_api_keys() -> SecretMap {
+    let mut map = HashMap::new();
+    for provider in default_remote_transcription_providers() {
+        map.insert(provider.id, String::new());
+    }
+    SecretMap(map)
+}
+
+fn default_remote_transcription_model_for(provider_id: &str) -> String {
+    match provider_id {
+        "openai" => "whisper-1".to_string(),
+        "groq" => "whisper-large-v3".to_string(),
+        "speaches" => "Systran/faster-whisper-large-v3".to_string(),
+        "faster-whisper" => "Systran/faster-whisper-large-v3".to_string(),
+        "localai" => "whisper-1".to_string(),
+        _ => String::new(),
+    }
+}
+
+fn default_remote_transcription_models() -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    for provider in default_remote_transcription_providers() {
+        map.insert(
+            provider.id.clone(),
+            default_remote_transcription_model_for(&provider.id),
+        );
+    }
+    map
+}
+
 fn ensure_post_process_defaults(settings: &mut AppSettings) -> bool {
     let mut changed = false;
     for provider in default_post_process_providers() {
@@ -951,6 +1055,45 @@ fn ensure_post_process_defaults(settings: &mut AppSettings) -> bool {
         }
     }
 
+    changed
+}
+
+/// Add missing remote-transcription providers, API-key entries, and model
+/// entries. Existing user values are left alone (only missing entries are
+/// added), so a customized base URL or model survives upgrades.
+pub fn ensure_remote_transcription_defaults(settings: &mut AppSettings) -> bool {
+    let mut changed = false;
+    for provider in default_remote_transcription_providers() {
+        if !settings
+            .remote_transcription_providers
+            .iter()
+            .any(|p| p.id == provider.id)
+        {
+            settings
+                .remote_transcription_providers
+                .push(provider.clone());
+            changed = true;
+        }
+        if !settings
+            .remote_transcription_api_keys
+            .contains_key(&provider.id)
+        {
+            settings
+                .remote_transcription_api_keys
+                .insert(provider.id.clone(), String::new());
+            changed = true;
+        }
+        if !settings
+            .remote_transcription_models
+            .contains_key(&provider.id)
+        {
+            settings.remote_transcription_models.insert(
+                provider.id.clone(),
+                default_remote_transcription_model_for(&provider.id),
+            );
+            changed = true;
+        }
+    }
     changed
 }
 
@@ -1050,6 +1193,11 @@ pub fn get_default_settings() -> AppSettings {
         post_process_models: default_post_process_models(),
         post_process_prompts: default_post_process_prompts(),
         post_process_selected_prompt_id: None,
+        remote_transcription_enabled: false,
+        remote_transcription_provider_id: default_remote_transcription_provider_id(),
+        remote_transcription_providers: default_remote_transcription_providers(),
+        remote_transcription_api_keys: default_remote_transcription_api_keys(),
+        remote_transcription_models: default_remote_transcription_models(),
         mute_while_recording: false,
         append_trailing_space: false,
         app_language: default_app_language(),
@@ -1116,6 +1264,24 @@ impl AppSettings {
             .iter_mut()
             .find(|provider| provider.id == provider_id)
     }
+
+    pub fn remote_transcription_provider(
+        &self,
+        provider_id: &str,
+    ) -> Option<&TranscriptionProvider> {
+        self.remote_transcription_providers
+            .iter()
+            .find(|provider| provider.id == provider_id)
+    }
+
+    pub fn remote_transcription_provider_mut(
+        &mut self,
+        provider_id: &str,
+    ) -> Option<&mut TranscriptionProvider> {
+        self.remote_transcription_providers
+            .iter_mut()
+            .find(|provider| provider.id == provider_id)
+    }
 }
 
 /// Startup entry point. Same load-or-create/salvage/migrate behavior as
@@ -1168,7 +1334,9 @@ pub fn get_settings(app: &AppHandle) -> AppSettings {
         default_settings
     };
 
-    if ensure_post_process_defaults(&mut settings) {
+    let post_changed = ensure_post_process_defaults(&mut settings);
+    let remote_changed = ensure_remote_transcription_defaults(&mut settings);
+    if post_changed || remote_changed {
         store.set("settings", serde_json::to_value(&settings).unwrap());
     }
 
@@ -1514,6 +1682,56 @@ pub fn get_history_limit(app: &AppHandle) -> usize {
 pub fn get_recording_retention_period(app: &AppHandle) -> RecordingRetentionPeriod {
     let settings = get_settings(app);
     settings.recording_retention_period
+}
+
+#[cfg(test)]
+mod remote_transcription_tests {
+    use super::*;
+
+    #[test]
+    fn remote_transcription_is_disabled_by_default() {
+        let settings = get_default_settings();
+        assert!(!settings.remote_transcription_enabled);
+        assert_eq!(settings.remote_transcription_provider_id, "custom");
+    }
+
+    #[test]
+    fn default_providers_include_empty_local_endpoints() {
+        let providers = default_remote_transcription_providers();
+        for id in ["speaches", "faster-whisper", "localai", "custom"] {
+            let provider = providers.iter().find(|p| p.id == id).unwrap();
+            assert_eq!(provider.base_url, "");
+            assert!(provider.allow_base_url_edit);
+        }
+    }
+
+    #[test]
+    fn ensure_defaults_adds_missing_provider_without_touching_user_values() {
+        let mut settings = get_default_settings();
+        settings
+            .remote_transcription_providers
+            .retain(|p| p.id != "localai");
+        if let Some(p) = settings
+            .remote_transcription_providers
+            .iter_mut()
+            .find(|p| p.id == "custom")
+        {
+            p.base_url = "http://example.test/v1".to_string();
+        }
+
+        assert!(ensure_remote_transcription_defaults(&mut settings));
+        assert!(settings
+            .remote_transcription_providers
+            .iter()
+            .any(|p| p.id == "localai"));
+        assert_eq!(
+            settings
+                .remote_transcription_provider("custom")
+                .unwrap()
+                .base_url,
+            "http://example.test/v1"
+        );
+    }
 }
 
 #[cfg(test)]

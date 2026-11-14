@@ -23,6 +23,7 @@ interface SettingsStore {
   outputDevices: AudioDevice[];
   customSounds: { start: boolean; stop: boolean };
   postProcessModelOptions: Record<string, string[]>;
+  remoteTranscriptionModelOptions: Record<string, string[]>;
   // null until loadUpdateChecksLocked() resolves
   updateChecksLocked: boolean | null;
 
@@ -65,6 +66,31 @@ interface SettingsStore {
   updatePostProcessModel: (providerId: string, model: string) => Promise<void>;
   fetchPostProcessModels: (providerId: string) => Promise<string[]>;
   setPostProcessModelOptions: (providerId: string, models: string[]) => void;
+  setRemoteTranscriptionProvider: (providerId: string) => Promise<void>;
+  updateRemoteTranscriptionBaseUrl: (
+    providerId: string,
+    baseUrl: string,
+  ) => Promise<void>;
+  updateRemoteTranscriptionApiKey: (
+    providerId: string,
+    apiKey: string,
+  ) => Promise<void>;
+  updateRemoteTranscriptionHealthEndpoint: (
+    providerId: string,
+    healthEndpoint: string,
+  ) => Promise<void>;
+  updateRemoteTranscriptionModel: (
+    providerId: string,
+    model: string,
+  ) => Promise<void>;
+  fetchRemoteTranscriptionModels: (providerId: string) => Promise<string[]>;
+  setRemoteTranscriptionModelOptions: (
+    providerId: string,
+    models: string[],
+  ) => void;
+  testRemoteTranscriptionConnection: (
+    providerId: string,
+  ) => Promise<{ ok: true } | { ok: false; error: string }>;
 
   // Internal state setters
   setSettings: (settings: Settings | null) => void;
@@ -164,6 +190,8 @@ const settingUpdaters: {
   history_limit: (value) => commands.updateHistoryLimit(value as number),
   post_process_enabled: (value) =>
     commands.changePostProcessEnabledSetting(value as boolean),
+  remote_transcription_enabled: (value) =>
+    commands.changeRemoteTranscriptionEnabledSetting(value as boolean),
   post_process_selected_prompt_id: (value) =>
     commands.setPostProcessSelectedPrompt(value as string),
   mute_while_recording: (value) =>
@@ -229,6 +257,7 @@ export const useSettingsStore = create<SettingsStore>()(
     outputDevices: [],
     customSounds: { start: false, stop: false },
     postProcessModelOptions: {},
+    remoteTranscriptionModelOptions: {},
     updateChecksLocked: null,
 
     // Internal setters
@@ -651,6 +680,217 @@ export const useSettingsStore = create<SettingsStore>()(
           [providerId]: models,
         },
       })),
+
+    setRemoteTranscriptionProvider: async (providerId) => {
+      const { settings, setUpdating, refreshSettings } = get();
+      const updateKey = "remote_transcription_provider_id";
+      const previousId = settings?.remote_transcription_provider_id ?? null;
+
+      setUpdating(updateKey, true);
+
+      if (settings) {
+        set((state) => ({
+          settings: state.settings
+            ? {
+                ...state.settings,
+                remote_transcription_provider_id: providerId,
+              }
+            : null,
+        }));
+      }
+
+      get().setRemoteTranscriptionModelOptions(providerId, []);
+
+      try {
+        const result =
+          await commands.setRemoteTranscriptionProvider(providerId);
+        if (result.status === "error") {
+          console.error(
+            "Failed to set remote transcription provider:",
+            result.error,
+          );
+          if (previousId !== null) {
+            set((state) => ({
+              settings: state.settings
+                ? {
+                    ...state.settings,
+                    remote_transcription_provider_id: previousId,
+                  }
+                : null,
+            }));
+          }
+          return;
+        }
+        await refreshSettings();
+      } catch (error) {
+        console.error("Failed to set remote transcription provider:", error);
+        if (previousId !== null) {
+          set((state) => ({
+            settings: state.settings
+              ? {
+                  ...state.settings,
+                  remote_transcription_provider_id: previousId,
+                }
+              : null,
+          }));
+        }
+      } finally {
+        setUpdating(updateKey, false);
+      }
+    },
+
+    updateRemoteTranscriptionBaseUrl: async (providerId, baseUrl) => {
+      const { settings, setUpdating, refreshSettings } = get();
+      const updateKey = `remote_transcription_base_url:${providerId}`;
+      const currentBaseUrl =
+        settings?.remote_transcription_providers?.find(
+          (provider) => provider.id === providerId,
+        )?.base_url ?? "";
+
+      // Blur fires even when the field did not change. Do not wipe the model
+      // on an unchanged URL.
+      if (currentBaseUrl.trim() === baseUrl.trim()) {
+        return;
+      }
+
+      setUpdating(updateKey, true);
+
+      try {
+        const urlResult =
+          await commands.changeRemoteTranscriptionBaseUrlSetting(
+            providerId,
+            baseUrl,
+          );
+        if (urlResult.status === "error") {
+          console.error("Failed to persist remote base URL:", urlResult.error);
+          return;
+        }
+
+        // A model from the previous endpoint is likely invalid.
+        const modelResult =
+          await commands.changeRemoteTranscriptionModelSetting(providerId, "");
+        if (modelResult.status === "error") {
+          console.error(
+            "Failed to reset remote model setting:",
+            modelResult.error,
+          );
+          return;
+        }
+
+        set((state) => ({
+          remoteTranscriptionModelOptions: {
+            ...state.remoteTranscriptionModelOptions,
+            [providerId]: [],
+          },
+        }));
+
+        await refreshSettings();
+      } catch (error) {
+        console.error("Failed to update remote base URL:", error);
+      } finally {
+        setUpdating(updateKey, false);
+      }
+    },
+
+    updateRemoteTranscriptionApiKey: async (providerId, apiKey) => {
+      const { setUpdating, refreshSettings } = get();
+      const updateKey = `remote_transcription_api_key:${providerId}`;
+
+      set((state) => ({
+        remoteTranscriptionModelOptions: {
+          ...state.remoteTranscriptionModelOptions,
+          [providerId]: [],
+        },
+      }));
+
+      setUpdating(updateKey, true);
+      try {
+        await commands.changeRemoteTranscriptionApiKeySetting(
+          providerId,
+          apiKey,
+        );
+        await refreshSettings();
+      } catch (error) {
+        console.error("Failed to update remote API key:", error);
+      } finally {
+        setUpdating(updateKey, false);
+      }
+    },
+
+    updateRemoteTranscriptionHealthEndpoint: async (
+      providerId,
+      healthEndpoint,
+    ) => {
+      const { setUpdating, refreshSettings } = get();
+      const updateKey = `remote_transcription_health_endpoint:${providerId}`;
+
+      setUpdating(updateKey, true);
+      try {
+        await commands.changeRemoteTranscriptionHealthEndpointSetting(
+          providerId,
+          healthEndpoint.trim() || null,
+        );
+        await refreshSettings();
+      } catch (error) {
+        console.error("Failed to update remote health endpoint:", error);
+      } finally {
+        setUpdating(updateKey, false);
+      }
+    },
+
+    updateRemoteTranscriptionModel: async (providerId, model) => {
+      const { setUpdating, refreshSettings } = get();
+      const updateKey = `remote_transcription_model:${providerId}`;
+
+      setUpdating(updateKey, true);
+      try {
+        await commands.changeRemoteTranscriptionModelSetting(providerId, model);
+        await refreshSettings();
+      } catch (error) {
+        console.error("Failed to update remote model:", error);
+      } finally {
+        setUpdating(updateKey, false);
+      }
+    },
+
+    fetchRemoteTranscriptionModels: async (providerId) => {
+      const updateKey = `remote_transcription_models_fetch:${providerId}`;
+      const { setUpdating } = get();
+
+      setUpdating(updateKey, true);
+      try {
+        const result =
+          await commands.fetchRemoteTranscriptionModels(providerId);
+        if (result.status === "ok") {
+          get().setRemoteTranscriptionModelOptions(providerId, result.data);
+          return result.data;
+        }
+        console.error("Failed to fetch remote models:", result.error);
+        return [];
+      } catch (error) {
+        console.error("Failed to fetch remote models:", error);
+        return [];
+      } finally {
+        setUpdating(updateKey, false);
+      }
+    },
+
+    setRemoteTranscriptionModelOptions: (providerId, models) =>
+      set((state) => ({
+        remoteTranscriptionModelOptions: {
+          ...state.remoteTranscriptionModelOptions,
+          [providerId]: models,
+        },
+      })),
+
+    testRemoteTranscriptionConnection: async (providerId) => {
+      const result =
+        await commands.testRemoteTranscriptionConnection(providerId);
+      if (result.status === "ok") {
+        return { ok: true };
+      }
+      return { ok: false, error: result.error };
+    },
 
     // Load default settings from Rust
     loadDefaultSettings: async () => {

@@ -50,6 +50,30 @@ interface UseSettingsReturn {
   ) => Promise<void>;
   updatePostProcessModel: (providerId: string, model: string) => Promise<void>;
   fetchPostProcessModels: (providerId: string) => Promise<string[]>;
+
+  // Remote transcription helpers
+  remoteTranscriptionModelOptions: Record<string, string[]>;
+  setRemoteTranscriptionProvider: (providerId: string) => Promise<void>;
+  updateRemoteTranscriptionBaseUrl: (
+    providerId: string,
+    baseUrl: string,
+  ) => Promise<void>;
+  updateRemoteTranscriptionApiKey: (
+    providerId: string,
+    apiKey: string,
+  ) => Promise<void>;
+  updateRemoteTranscriptionHealthEndpoint: (
+    providerId: string,
+    healthEndpoint: string,
+  ) => Promise<void>;
+  updateRemoteTranscriptionModel: (
+    providerId: string,
+    model: string,
+  ) => Promise<void>;
+  fetchRemoteTranscriptionModels: (providerId: string) => Promise<string[]>;
+  testRemoteTranscriptionConnection: (
+    providerId: string,
+  ) => Promise<{ ok: true } | { ok: false; error: string }>;
 }
 
 export const useSettings = (): UseSettingsReturn => {
@@ -85,5 +109,14 @@ export const useSettings = (): UseSettingsReturn => {
     updatePostProcessApiKey: store.updatePostProcessApiKey,
     updatePostProcessModel: store.updatePostProcessModel,
     fetchPostProcessModels: store.fetchPostProcessModels,
+    remoteTranscriptionModelOptions: store.remoteTranscriptionModelOptions,
+    setRemoteTranscriptionProvider: store.setRemoteTranscriptionProvider,
+    updateRemoteTranscriptionBaseUrl: store.updateRemoteTranscriptionBaseUrl,
+    updateRemoteTranscriptionApiKey: store.updateRemoteTranscriptionApiKey,
+    updateRemoteTranscriptionHealthEndpoint:
+      store.updateRemoteTranscriptionHealthEndpoint,
+    updateRemoteTranscriptionModel: store.updateRemoteTranscriptionModel,
+    fetchRemoteTranscriptionModels: store.fetchRemoteTranscriptionModels,
+    testRemoteTranscriptionConnection: store.testRemoteTranscriptionConnection,
   };
 };

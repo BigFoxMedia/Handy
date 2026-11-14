@@ -7,8 +7,11 @@ use crate::managers::history::HistoryManager;
 use crate::managers::model::ModelManager;
 use crate::managers::transcription::policy::{live_decode, LiveDecode, ModelTraits};
 use crate::managers::transcription::StreamWorkKind;
-use crate::managers::transcription::{Transcription, TranscriptionManager};
+use crate::managers::transcription::{
+    finish_remote_text, remote_language_decision, Transcription, TranscriptionManager,
+};
 use crate::notices::{self, Notice, NoticeCode, NoticeSource};
+use crate::remote_stt::{self, TranscriptionSourceEvent};
 use crate::settings::{get_settings, AppSettings, OverlayStyle, APPLE_INTELLIGENCE_PROVIDER_ID};
 use crate::shortcut;
 use crate::tray::{set_tray_state, TrayIconState};
@@ -25,7 +28,7 @@ use std::future::Future;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 use tauri_specta::Event;
 
 /// How a dictation ended.
@@ -205,6 +208,22 @@ where
 
 fn should_use_streaming_overlay(style: OverlayStyle, is_streaming: bool) -> bool {
     style == OverlayStyle::Live && is_streaming
+}
+
+fn emit_transcription_source(
+    app: &AppHandle,
+    source: &str,
+    provider_id: Option<String>,
+    error: Option<String>,
+) {
+    let _ = app.emit(
+        "transcription-source",
+        TranscriptionSourceEvent {
+            source: source.to_string(),
+            provider_id,
+            error,
+        },
+    );
 }
 
 /// What became of a transcription's post-processing.
@@ -522,11 +541,15 @@ impl ShortcutAction for TranscribeAction {
         let tm = app.state::<Arc<TranscriptionManager>>();
         let rm = app.state::<Arc<AudioRecordingManager>>();
 
-        // Load ASR model and VAD model in parallel
+        // Load ASR model and VAD model in parallel. When remote STT is enabled
+        // the local model is not needed on the happy path; it is loaded only
+        // if the remote request fails and we fall back to local decoding.
         let kickoff_started = Instant::now();
-        // An empty selection has nothing to load; the check below says so.
-        let selected_model = get_settings(app).selected_model;
-        let load_started = !selected_model.is_empty() && tm.initiate_model_load(true);
+        let start_settings = get_settings(app);
+        let remote_enabled = start_settings.remote_transcription_enabled;
+        let selected_model = start_settings.selected_model.clone();
+        let load_started =
+            !remote_enabled && !selected_model.is_empty() && tm.initiate_model_load(true);
         let rm_clone = Arc::clone(&rm);
         std::thread::spawn(move || {
             if let Err(e) = rm_clone.preload_vad() {
@@ -537,7 +560,9 @@ impl ShortcutAction for TranscribeAction {
 
         // Don't open the mic if nothing can transcribe the recording. A load
         // started above reports its own failure; one already running doesn't.
-        if !tm.is_model_loaded() {
+        // Remote-only dictation bypasses this gate: the endpoint itself is
+        // the transcriber, and a local model is optional fallback.
+        if !remote_enabled && !tm.is_model_loaded() {
             if selected_model.is_empty() {
                 warn!("Not starting recording: no model is selected");
                 tm.raise_no_model_selected();
@@ -577,8 +602,12 @@ impl ShortcutAction for TranscribeAction {
             .as_ref()
             .map(|m| m.supports_streaming)
             .unwrap_or(false);
+        let live_decode_allowed = !remote_enabled && model_supports_streaming;
         let vad_policy = if !settings.vad_enabled {
             VadPolicy::Disabled
+        } else if remote_enabled {
+            // Remote needs one filtered clip at stop, not live frames.
+            VadPolicy::Offline
         } else if model_supports_streaming {
             VadPolicy::Streaming
         } else {
@@ -588,20 +617,23 @@ impl ShortcutAction for TranscribeAction {
         // is unknown, so assume not: the worker decides again with the loaded
         // model, and a wrong guess costs only an idle worker.
         let expected_model = ModelTraits {
-            streaming: model_supports_streaming,
+            streaming: live_decode_allowed,
             long_form: false,
         };
-        if live_decode(expected_model, settings.long_form_chunking) != LiveDecode::None {
+        if !remote_enabled
+            && live_decode(expected_model, settings.long_form_chunking) != LiveDecode::None
+        {
             tm.start_stream();
         }
         let plan_elapsed = plan_started.elapsed();
 
         // Sizing the overlay follows the same advertised capability. A model that
         // doesn't stream (or whose capability is not known yet) gets the compact
-        // pill instead of an oversized transparent live window.
+        // pill instead of an oversized transparent live window. Remote-only
+        // dictation has no live text, so it always gets the compact overlay.
         let overlay_started = Instant::now();
         match settings.overlay_style {
-            OverlayStyle::Live if model_supports_streaming => utils::show_streaming_overlay(app),
+            OverlayStyle::Live if live_decode_allowed => utils::show_streaming_overlay(app),
             OverlayStyle::Live | OverlayStyle::Minimal => show_recording_overlay(app),
             OverlayStyle::None => {} // show_overlay_state no-ops on None anyway
         }
@@ -718,11 +750,18 @@ impl ShortcutAction for TranscribeAction {
         // Stop should give immediate visual feedback. Live streaming can keep
         // the larger panel, but it still switches from listening to a working
         // spinner while the stream finalizes. Non-streaming paths use the
-        // compact transcribing pill (None no-ops in show_*).
-        let style = get_settings(app).overlay_style;
+        // compact transcribing pill (None no-ops in show_*). Remote-only
+        // dictation is non-streaming even if a stale stream exists.
+        let settings_at_stop = get_settings(app);
+        let remote_enabled = settings_at_stop.remote_transcription_enabled;
+        let style = settings_at_stop.overlay_style;
         // Capture this before finalizing the stream so every later working state
         // targets the same overlay that was shown for this transcription.
-        let use_streaming_overlay = should_use_streaming_overlay(style, tm.is_streaming());
+        let use_streaming_overlay =
+            !remote_enabled && should_use_streaming_overlay(style, tm.is_streaming());
+        if remote_enabled {
+            tm.cancel_stream();
+        }
         if use_streaming_overlay {
             tm.emit_stream_working(StreamWorkKind::Transcribing);
         } else {
@@ -782,12 +821,62 @@ impl ShortcutAction for TranscribeAction {
                         crate::audio_toolkit::save_wav_file(&wav_path, &samples_for_wav)
                     });
 
-                    // Transcribe concurrently with WAV save: the live decode's
-                    // result when it has one (all audio was already fed to it),
-                    // otherwise a batch run of the samples. A cancel is surfaced
-                    // as an error, so it never starts a batch run.
+                    // Transcribe concurrently with WAV save. Remote STT is
+                    // fully async here; any failure falls back to the local
+                    // engine, loading it on demand if remote-only skipped it.
                     let transcription_time = Instant::now();
-                    let transcription_result = tm.transcribe_recording(samples);
+                    let transcription_result = if remote_enabled {
+                        match complete_unless_cancelled(
+                            remote_stt::transcribe_with_settings(&ah, &settings_at_stop, &samples),
+                            || rm.was_cancelled_since(cancel_generation),
+                        )
+                        .await
+                        {
+                            None => {
+                                debug!("Remote transcription cancelled");
+                                tm.cancel_stream();
+                                utils::hide_recording_overlay(&ah);
+                                set_tray_state(&ah, TrayIconState::Idle);
+                                return;
+                            }
+                            Some(Ok(text)) => {
+                                let provider_id =
+                                    settings_at_stop.remote_transcription_provider_id.clone();
+                                let language_hint = if settings_at_stop.selected_language.is_empty()
+                                    || settings_at_stop.selected_language == "auto"
+                                {
+                                    None
+                                } else {
+                                    Some(settings_at_stop.selected_language.clone())
+                                };
+                                let text =
+                                    finish_remote_text(text, &settings_at_stop, language_hint);
+                                emit_transcription_source(&ah, "remote", Some(provider_id), None);
+                                Ok(Transcription {
+                                    text,
+                                    language: Some(remote_language_decision(&settings_at_stop)),
+                                })
+                            }
+                            Some(Err(e)) => {
+                                warn!("Remote STT failed, falling back to local: {e}");
+                                emit_transcription_source(
+                                    &ah,
+                                    "local-fallback",
+                                    Some(settings_at_stop.remote_transcription_provider_id.clone()),
+                                    Some(e),
+                                );
+                                tm.initiate_model_load(true);
+                                tm.transcribe_recording(samples)
+                            }
+                        }
+                    } else {
+                        tm.initiate_model_load(true);
+                        let result = tm.transcribe_recording(samples);
+                        if result.is_ok() {
+                            emit_transcription_source(&ah, "local", None, None);
+                        }
+                        result
+                    };
 
                     // Await WAV save and verify
                     let wav_saved = match wav_handle.await {

@@ -17,6 +17,7 @@
     "models": "Modelos",
     "advanced": "Avançado",
     "postProcessing": "Pós-Processamento",
+    "remoteTranscription": "Remote STT",
     "history": "Histórico",
     "debug": "Depuração",
     "about": "Sobre"
@@ -983,6 +984,41 @@
     "transcribing": "Transcrevendo...",
     "processing": "Processando...",
     "loadingModel": "Carregando modelo..."
+  },
+  "remoteTranscription": {
+    "enable": {
+      "title": "Remote transcription",
+      "description": "Send audio to an OpenAI-compatible server instead of running the local model. Falls back to the local model on any failure."
+    },
+    "provider": "Provider",
+    "healthEndpoint": {
+      "title": "Health check path",
+      "description": "Optional path used for the pre-flight health probe, relative to the base URL. Leave blank to use /models."
+    },
+    "model": "Model",
+    "fetchModels": {
+      "label": "Fetch available models",
+      "loading": "Fetching…"
+    },
+    "test": {
+      "button": "Test connection",
+      "description": "Send a small request to the configured endpoint to verify it's reachable and accepting your API key.",
+      "inProgress": "Testing…",
+      "success": "Connection OK",
+      "failure": "Failed: {{error}}"
+    },
+    "badge": {
+      "remote": "Remote",
+      "local": "Local",
+      "unknown": "Unknown",
+      "localLoaded": "Local model loaded",
+      "localUnloaded": "Local model not loaded",
+      "source": {
+        "remote": "via remote",
+        "local-fallback": "via local (fallback)",
+        "local": "via local"
+      }
+    }
   },
   "secureInput": {
     "blockedWithCulprit_one": "{{name}} pode estar bloqueando 1 atalho",

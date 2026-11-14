@@ -23,6 +23,7 @@ mod paste_tx;
 pub mod portable;
 #[cfg(target_os = "linux")]
 mod primary_selection;
+pub(crate) mod remote_stt;
 mod secure_input;
 mod settings;
 mod shortcut;
@@ -570,11 +571,62 @@ fn run_headless_transcription(app: &AppHandle, args: &CliArgs) -> i32 {
     let audio_secs = samples.len() as f64 / 16_000.0;
 
     let tm = app.state::<Arc<TranscriptionManager>>();
+    let settings = get_settings(app);
+
+    // The headless path honours the same remote-STT setting as dictation.
+    // It runs on a worker thread, so blocking on the async client is safe.
+    if settings.remote_transcription_enabled {
+        let remote_started = Instant::now();
+        match tauri::async_runtime::block_on(crate::remote_stt::transcribe_with_settings(
+            app, &settings, &samples,
+        )) {
+            Ok(raw) => {
+                let hint = if settings.selected_language.is_empty()
+                    || settings.selected_language == "auto"
+                {
+                    None
+                } else {
+                    Some(settings.selected_language.clone())
+                };
+                let text = crate::managers::transcription::finish_remote_text(raw, &settings, hint);
+                let elapsed_ms = remote_started.elapsed().as_millis() as u64;
+                if args.json {
+                    println!(
+                        "{}",
+                        serde_json::json!({
+                            "model": "remote",
+                            "requested_device": "remote",
+                            "bound_backend": null,
+                            "audio_secs": audio_secs,
+                            "load_ms": 0,
+                            "transcribe_ms": [elapsed_ms],
+                            "best_ms": elapsed_ms,
+                            "rtf": if elapsed_ms > 0 {
+                                audio_secs / (elapsed_ms as f64 / 1000.0)
+                            } else {
+                                0.0
+                            },
+                            "text": text,
+                        })
+                    );
+                } else {
+                    println!(
+                        "model=remote device=remote audio={:.2}s text: {}",
+                        audio_secs, text
+                    );
+                }
+                return 0;
+            }
+            Err(e) => {
+                eprintln!("remote transcription failed: {e}; falling back to the local model");
+            }
+        }
+    }
 
     let model_id = args
         .model
         .clone()
-        .unwrap_or_else(|| get_settings(app).selected_model);
+        .unwrap_or_else(|| settings.selected_model.clone());
     if model_id.is_empty() {
         eprintln!("error: no model selected (pass --model or pick one in the app)");
         return 2;
@@ -819,6 +871,15 @@ pub fn run(cli_args: CliArgs) {
             commands::history::update_history_limit,
             commands::history::update_recording_retention_period,
             helpers::clamshell::is_laptop,
+            commands::remote_transcription::change_remote_transcription_enabled_setting,
+            commands::remote_transcription::set_remote_transcription_provider,
+            commands::remote_transcription::change_remote_transcription_base_url_setting,
+            commands::remote_transcription::change_remote_transcription_api_key_setting,
+            commands::remote_transcription::change_remote_transcription_health_endpoint_setting,
+            commands::remote_transcription::change_remote_transcription_model_setting,
+            commands::remote_transcription::fetch_remote_transcription_models,
+            commands::remote_transcription::test_remote_transcription_connection,
+            commands::remote_transcription::get_remote_transcription_health,
             notices::get_active_notices,
             notices::dismiss_notice,
             notices::dismiss_overlay_notice,
@@ -1103,6 +1164,11 @@ pub fn run(cli_args: CliArgs) {
             app.manage(TranscriptionCoordinator::new(app_handle.clone()));
 
             initialize_core_logic(&app_handle);
+
+            // Remote STT health monitor: shared state plus background polling.
+            let remote_health_monitor = remote_stt::RemoteHealthMonitor::new();
+            app.manage(remote_health_monitor.clone());
+            remote_stt::health::spawn(app_handle.clone(), remote_health_monitor);
 
             // Secure Input monitor (macOS): detects stuck secure input that
             // silently blocks keyed shortcuts, warns the user, and activates
