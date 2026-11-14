@@ -8,6 +8,9 @@ on:
     branches: [feat/remote-stt-v2]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   linux:
     uses: ./.github/workflows/build.yml
