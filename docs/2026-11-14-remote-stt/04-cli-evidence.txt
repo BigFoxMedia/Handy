@@ -1,0 +1,3 @@
+/tmp/cli-remote.txt:model=remote device=remote audio=11.00s text: mock transcription
+/tmp/cli-fallback.txt:remote transcription failed: Remote STT request failed: error sending request for url (http://127.0.0.1:9/v1/audio/transcriptions); falling back to the local model
+/tmp/cli-fallback.txt:error: no model selected (pass --model or pick one in the app)
