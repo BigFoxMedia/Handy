@@ -43,5 +43,8 @@ blob-report/
 # Nix build output
 result
 
+# Fork-local build artifacts
+dist-artifacts/
+
 # Python bytecode (scripts/)
 __pycache__/

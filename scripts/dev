@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Run a command inside the long-lived dev container.
+# Usage: ./scripts/dev <command> [args...]
+#        ./scripts/dev cargo test
+#        ./scripts/dev bun run lint
+set -euo pipefail
+
+if [ "$#" -eq 0 ]; then
+  echo "usage: $0 <command> [args...]" >&2
+  exit 2
+fi
+
+if ! docker compose ps --status running --services 2>/dev/null | grep -q '^dev$'; then
+  docker compose up -d dev >/dev/null
+fi
+
+exec docker compose exec -T dev "$@"

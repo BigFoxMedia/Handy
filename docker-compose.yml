@@ -1,0 +1,25 @@
+services:
+  dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    image: handy-dev:latest
+    container_name: handy-dev
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+      - cargo-registry:/usr/local/cargo/registry
+      - cargo-git:/usr/local/cargo/git
+      - cargo-target:/workspace/src-tauri/target
+      - bun-cache:/root/.bun/install/cache
+      - node-modules:/workspace/node_modules
+    command: sleep infinity
+    environment:
+      - DISPLAY=:99
+
+volumes:
+  cargo-registry:
+  cargo-git:
+  cargo-target:
+  bun-cache:
+  node-modules:

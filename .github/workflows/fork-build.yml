@@ -1,0 +1,30 @@
+name: "Fork Build"
+
+# Deliberately fork-local: upstream signs its installers with Azure and uploads
+# updater artifacts. These builds are unsigned personal artifacts, so the fork
+# config disables updater signing and makes the Windows sign command a no-op.
+on:
+  push:
+    branches: [feat/remote-stt-v2]
+  workflow_dispatch:
+
+jobs:
+  linux:
+    uses: ./.github/workflows/build.yml
+    with:
+      platform: ubuntu-24.04
+      target: x86_64-unknown-linux-gnu
+      build-args: "--bundles deb --config src-tauri/tauri.fork.conf.json"
+      sign-binaries: false
+      asset-prefix: handy-fork
+      upload-artifacts: true
+
+  windows:
+    uses: ./.github/workflows/build.yml
+    with:
+      platform: windows-latest
+      target: x86_64-pc-windows-msvc
+      build-args: "--bundles nsis --config src-tauri/tauri.fork.conf.json"
+      sign-binaries: false
+      asset-prefix: handy-fork
+      upload-artifacts: true
