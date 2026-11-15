@@ -1,0 +1,11 @@
+Handy remote STT through LiteLLM (no LAN IP in Handy):
+
+Base URL: https://litellm.apps-prod.enpraise.com/v1
+Model:    stt-whisper-local
+Health:   /models
+
+Command:
+  handy --transcribe-file /tmp/jfk.wav
+
+Output:
+  model=remote device=remote audio=11.00s text: And so, my fellow Americans, ask not what your country can do for you, ask what you can do for your country.
