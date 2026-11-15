@@ -98,6 +98,13 @@ Linux (amd64 `.deb`) from the dev container:
   --config src-tauri/tauri.fork.conf.json
 ```
 
+Current 0.10.1 build:
+
+```text
+Handy_0.10.1_amd64.deb
+sha256 7cd66476944ba53ef17644d6c7f9449bc7cc269ec21446090a3f8898c21e6911
+```
+
 Windows installers are built by `.github/workflows/fork-build.yml` on
 `windows-latest`; it uses the same fork config to disable updater artifacts and
 make the Windows signing command a no-op. Upstream's signed/Azure build is
@@ -107,10 +114,10 @@ The 0.10.1 fork build produced both installer formats (unsigned):
 
 ```text
 Handy_0.10.1_x64-setup.exe   # NSIS
-sha256 968694fa1954994ffa23e6f39f37630041c886479cc2152a779fbe0212c63d96
+sha256 1e5952c9b847a74d7e2a884a7b888c43ce00c7a0b9fcf26755a59bcbfa445eb9
 
 Handy_0.10.1_x64_en-US.msi   # MSI
-sha256 1ffa38a96285385370296b3fa4ae1271eb9399cc0b01ac68fb246e1badf385d4
+sha256 692a9add44e7a3a6d99213e5cb859d2573af9bd1c3040bfbf4b6edf5a4ff123a
 ```
 
 Because they are unsigned, Windows SmartScreen may warn on first launch.
