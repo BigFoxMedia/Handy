@@ -214,15 +214,21 @@ fn initialize_core_logic(app_handle: &AppHandle) {
         TranscriptionManager::new(app_handle, model_manager.clone())
             .expect("Failed to initialize transcription manager"),
     );
+    let remote_preview_manager = Arc::new(remote_stt::RemotePreviewManager::new());
     let recording_manager = Arc::new(
-        AudioRecordingManager::new(app_handle, transcription_manager.stream_router())
-            .expect("Failed to initialize recording manager"),
+        AudioRecordingManager::new(
+            app_handle,
+            transcription_manager.stream_router(),
+            remote_preview_manager.router(),
+        )
+        .expect("Failed to initialize recording manager"),
     );
     let history_manager =
         Arc::new(HistoryManager::new(app_handle).expect("Failed to initialize history manager"));
 
     // Add managers to Tauri's managed state
     app_handle.manage(recording_manager.clone());
+    app_handle.manage(remote_preview_manager.clone());
     app_handle.manage(model_manager.clone());
     app_handle.manage(transcription_manager.clone());
     app_handle.manage(history_manager.clone());
@@ -872,6 +878,7 @@ pub fn run(cli_args: CliArgs) {
             commands::history::update_recording_retention_period,
             helpers::clamshell::is_laptop,
             commands::remote_transcription::change_remote_transcription_enabled_setting,
+            commands::remote_transcription::change_remote_transcription_streaming_enabled_setting,
             commands::remote_transcription::set_remote_transcription_provider,
             commands::remote_transcription::change_remote_transcription_base_url_setting,
             commands::remote_transcription::change_remote_transcription_api_key_setting,

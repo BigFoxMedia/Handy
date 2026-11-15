@@ -5,10 +5,12 @@ use tauri::{AppHandle, Manager};
 
 pub mod client;
 pub mod health;
+pub mod preview;
 pub mod wav;
 
-pub use client::{health_check, transcribe, RemoteTranscribeOptions};
+pub use client::{health_check, transcribe, transcribe_preview, RemoteTranscribeOptions};
 pub use health::{HealthSnapshot, RemoteHealthMonitor};
+pub use preview::{RemotePreviewManager, RemotePreviewRouter};
 
 /// Resolve the configured provider and transcribe `audio` remotely.
 /// Returns the raw text or the error that sends the caller to local fallback.

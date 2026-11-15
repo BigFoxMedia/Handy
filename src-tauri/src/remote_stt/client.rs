@@ -10,6 +10,7 @@ use std::time::Duration;
 
 const HEALTH_TIMEOUT: Duration = Duration::from_secs(2);
 const TRANSCRIBE_TIMEOUT: Duration = Duration::from_secs(60);
+const PREVIEW_TIMEOUT: Duration = Duration::from_secs(10);
 const SAMPLE_RATE: u32 = 16_000;
 
 #[derive(Debug, Clone)]
@@ -104,6 +105,27 @@ pub async fn transcribe(
     audio: &[f32],
     options: &RemoteTranscribeOptions,
 ) -> Result<String, String> {
+    transcribe_with_timeout(provider, api_key, audio, options, TRANSCRIBE_TIMEOUT).await
+}
+
+/// Preview decodes use a shorter timeout so a slow endpoint cannot hold the
+/// live overlay for the whole recording. Preview failures never fall back.
+pub async fn transcribe_preview(
+    provider: &TranscriptionProvider,
+    api_key: &str,
+    audio: &[f32],
+    options: &RemoteTranscribeOptions,
+) -> Result<String, String> {
+    transcribe_with_timeout(provider, api_key, audio, options, PREVIEW_TIMEOUT).await
+}
+
+async fn transcribe_with_timeout(
+    provider: &TranscriptionProvider,
+    api_key: &str,
+    audio: &[f32],
+    options: &RemoteTranscribeOptions,
+    timeout: Duration,
+) -> Result<String, String> {
     if provider.base_url.trim().is_empty() {
         return Err("Provider base URL is empty".to_string());
     }
@@ -145,7 +167,7 @@ pub async fn transcribe(
         form = form.text("prompt", options.custom_words.join(", "));
     }
 
-    let client = build_client(api_key, TRANSCRIBE_TIMEOUT)?;
+    let client = build_client(api_key, timeout)?;
     let response = client
         .post(&url)
         .multipart(form)
@@ -277,6 +299,24 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(text, "hello world");
+        m.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn transcribe_preview_returns_text() {
+        let mut server = mockito::Server::new_async().await;
+        let m = server
+            .mock("POST", "/audio/transcriptions")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"text":"live preview"}"#)
+            .create_async()
+            .await;
+        let p = provider(&server.url());
+        let text = transcribe_preview(&p, "k", &[0.0; 1600], &opts(false))
+            .await
+            .unwrap();
+        assert_eq!(text, "live preview");
         m.assert_async().await;
     }
 

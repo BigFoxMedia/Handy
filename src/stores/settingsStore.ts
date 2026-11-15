@@ -192,6 +192,8 @@ const settingUpdaters: {
     commands.changePostProcessEnabledSetting(value as boolean),
   remote_transcription_enabled: (value) =>
     commands.changeRemoteTranscriptionEnabledSetting(value as boolean),
+  remote_transcription_streaming_enabled: (value) =>
+    commands.changeRemoteTranscriptionStreamingEnabledSetting(value as boolean),
   post_process_selected_prompt_id: (value) =>
     commands.setPostProcessSelectedPrompt(value as string),
   mute_while_recording: (value) =>

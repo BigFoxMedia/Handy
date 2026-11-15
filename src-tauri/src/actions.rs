@@ -11,7 +11,7 @@ use crate::managers::transcription::{
     finish_remote_text, remote_language_decision, Transcription, TranscriptionManager,
 };
 use crate::notices::{self, Notice, NoticeCode, NoticeSource};
-use crate::remote_stt::{self, TranscriptionSourceEvent};
+use crate::remote_stt::{self, RemotePreviewManager, TranscriptionSourceEvent};
 use crate::settings::{get_settings, AppSettings, OverlayStyle, APPLE_INTELLIGENCE_PROVIDER_ID};
 use crate::shortcut;
 use crate::tray::{set_tray_state, TrayIconState};
@@ -224,6 +224,15 @@ fn emit_transcription_source(
             error,
         },
     );
+}
+
+fn cancel_all_streams(app: &AppHandle) {
+    if let Some(tm) = app.try_state::<Arc<TranscriptionManager>>() {
+        tm.cancel_stream();
+    }
+    if let Some(preview) = app.try_state::<Arc<RemotePreviewManager>>() {
+        preview.cancel();
+    }
 }
 
 /// What became of a transcription's post-processing.
@@ -603,6 +612,30 @@ impl ShortcutAction for TranscribeAction {
             .map(|m| m.supports_streaming)
             .unwrap_or(false);
         let live_decode_allowed = !remote_enabled && model_supports_streaming;
+
+        // Remote live preview is opt-in and only useful when the Live overlay
+        // can display text. It runs independently of the local streaming worker.
+        let remote_preview_requested = remote_enabled
+            && settings.remote_transcription_streaming_enabled
+            && settings.overlay_style == OverlayStyle::Live;
+        let remote_preview = app.state::<Arc<RemotePreviewManager>>();
+        let mut remote_preview_active = false;
+        if remote_preview_requested {
+            match remote_preview.start(app, &settings) {
+                Ok(()) => {
+                    remote_preview_active = remote_preview.is_active();
+                }
+                Err(e) => {
+                    warn!("Remote live preview not started: {e}");
+                }
+            }
+        } else {
+            // Clear any worker left over from an earlier take so a later stop
+            // cannot mistake it for this recording's preview.
+            remote_preview.cancel();
+        }
+
+        let streaming_overlay_allowed = live_decode_allowed || remote_preview_active;
         let vad_policy = if !settings.vad_enabled {
             VadPolicy::Disabled
         } else if remote_enabled {
@@ -629,11 +662,11 @@ impl ShortcutAction for TranscribeAction {
 
         // Sizing the overlay follows the same advertised capability. A model that
         // doesn't stream (or whose capability is not known yet) gets the compact
-        // pill instead of an oversized transparent live window. Remote-only
-        // dictation has no live text, so it always gets the compact overlay.
+        // pill instead of an oversized transparent live window. Remote live
+        // preview also gets the Live panel.
         let overlay_started = Instant::now();
         match settings.overlay_style {
-            OverlayStyle::Live if live_decode_allowed => utils::show_streaming_overlay(app),
+            OverlayStyle::Live if streaming_overlay_allowed => utils::show_streaming_overlay(app),
             OverlayStyle::Live | OverlayStyle::Minimal => show_recording_overlay(app),
             OverlayStyle::None => {} // show_overlay_state no-ops on None anyway
         }
@@ -712,7 +745,7 @@ impl ShortcutAction for TranscribeAction {
         } else {
             // Starting failed (for example due to blocked microphone permissions).
             // Revert UI state so we don't stay stuck in the recording overlay.
-            tm.cancel_stream();
+            cancel_all_streams(app);
             set_tray_state(app, TrayIconState::Idle);
             if let Some(err) = recording_error {
                 notices::raise(
@@ -757,8 +790,16 @@ impl ShortcutAction for TranscribeAction {
         let style = settings_at_stop.overlay_style;
         // Capture this before finalizing the stream so every later working state
         // targets the same overlay that was shown for this transcription.
+        let remote_preview = app.state::<Arc<RemotePreviewManager>>();
+        let remote_preview_active = remote_preview.is_active();
+        let remote_preview_started = remote_preview.was_started();
         let use_streaming_overlay =
-            !remote_enabled && should_use_streaming_overlay(style, tm.is_streaming());
+            should_use_streaming_overlay(style, !remote_enabled && tm.is_streaming())
+                || (style == OverlayStyle::Live
+                    && (remote_preview_active || remote_preview_started));
+        if remote_preview_active {
+            remote_preview.cancel();
+        }
         if remote_enabled {
             tm.cancel_stream();
         }
@@ -798,7 +839,7 @@ impl ShortcutAction for TranscribeAction {
 
                 if rm.was_cancelled_since(cancel_generation) {
                     debug!("Transcription operation cancelled after recording stop");
-                    tm.cancel_stream();
+                    cancel_all_streams(&ah);
                     utils::hide_recording_overlay(&ah);
                     set_tray_state(&ah, TrayIconState::Idle);
                     return;
@@ -808,7 +849,7 @@ impl ShortcutAction for TranscribeAction {
                     debug!("Recording produced no audio samples; skipping persistence");
                     // Tear down any streaming worker so its channel doesn't leak
                     // and block the next start_stream.
-                    tm.cancel_stream();
+                    cancel_all_streams(&ah);
                     finish_without_text(&ah, input_silent, 0, stop_time);
                 } else {
                     // Save WAV concurrently with transcription
@@ -834,7 +875,7 @@ impl ShortcutAction for TranscribeAction {
                         {
                             None => {
                                 debug!("Remote transcription cancelled");
-                                tm.cancel_stream();
+                                cancel_all_streams(&ah);
                                 utils::hide_recording_overlay(&ah);
                                 set_tray_state(&ah, TrayIconState::Idle);
                                 return;
@@ -1123,7 +1164,7 @@ impl ShortcutAction for TranscribeAction {
             } else {
                 debug!("No samples retrieved from recording stop");
                 // Tear down any streaming worker so its channel doesn't leak.
-                tm.cancel_stream();
+                cancel_all_streams(&ah);
                 utils::hide_recording_overlay(&ah);
                 set_tray_state(&ah, TrayIconState::Idle);
                 if !rm.was_cancelled_since(cancel_generation) {

@@ -990,6 +990,11 @@
       "title": "Remote transcription",
       "description": "Send audio to an OpenAI-compatible server instead of running the local model. Falls back to the local model on any failure."
     },
+    "streaming": {
+      "title": "Live preview",
+      "description": "Show live text while recording. Requires the Live overlay style. Preview audio is uploaded during recording; final text is still produced from the full recording.",
+      "requiresLive": "Requires the Live overlay style. Change it in Advanced settings."
+    },
     "provider": "Provider",
     "healthEndpoint": {
       "title": "Health check path",

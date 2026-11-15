@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { RefreshCcw } from "lucide-react";
-import { SettingContainer, SettingsGroup } from "@/components/ui";
+import { SettingContainer, SettingsGroup, ToggleSwitch } from "@/components/ui";
 import { Button } from "../../ui/Button";
 import { ResetButton } from "../../ui/ResetButton";
 import { useSettings } from "../../../hooks/useSettings";
@@ -17,6 +17,7 @@ export const RemoteTranscriptionSettings: React.FC = () => {
   const {
     settings,
     isUpdating,
+    updateSetting,
     remoteTranscriptionModelOptions,
     setRemoteTranscriptionProvider,
     updateRemoteTranscriptionBaseUrl,
@@ -30,6 +31,9 @@ export const RemoteTranscriptionSettings: React.FC = () => {
   const [testStatus, setTestStatus] = useState<string | null>(null);
 
   const enabled = settings?.remote_transcription_enabled ?? false;
+  const streamingEnabled =
+    settings?.remote_transcription_streaming_enabled ?? false;
+  const liveOverlay = settings?.overlay_style === "live";
   const providers = settings?.remote_transcription_providers ?? [];
   const providerId =
     settings?.remote_transcription_provider_id ?? providers[0]?.id ?? "custom";
@@ -101,6 +105,22 @@ export const RemoteTranscriptionSettings: React.FC = () => {
 
         {enabled && (
           <>
+            <ToggleSwitch
+              checked={streamingEnabled}
+              onChange={(next) =>
+                updateSetting("remote_transcription_streaming_enabled", next)
+              }
+              disabled={!liveOverlay}
+              isUpdating={isUpdating("remote_transcription_streaming_enabled")}
+              label={t("remoteTranscription.streaming.title")}
+              description={
+                liveOverlay
+                  ? t("remoteTranscription.streaming.description")
+                  : t("remoteTranscription.streaming.requiresLive")
+              }
+              grouped={true}
+            />
+
             <SettingContainer
               title={t("remoteTranscription.provider")}
               description={t(

@@ -9,6 +9,7 @@ use crate::audio_toolkit::{
 use crate::helpers::clamshell;
 use crate::managers::transcription::StreamRouter;
 use crate::notices::NoticeCode;
+use crate::remote_stt::RemotePreviewRouter;
 use crate::settings::{get_settings, write_settings, AppSettings, VadBackend};
 use crate::utils;
 use handy_recorder::{Channels, EndReason, ErrorKind, Recorder, RecorderConfig, StartError};
@@ -521,6 +522,7 @@ impl AudioRecordingManager {
     pub fn new(
         app: &tauri::AppHandle,
         stream_router: Arc<StreamRouter>,
+        remote_preview_router: Arc<RemotePreviewRouter>,
     ) -> Result<Self, anyhow::Error> {
         let settings = get_settings(app);
         let mode = if settings.always_on_microphone {
@@ -533,7 +535,10 @@ impl AudioRecordingManager {
             let app_handle = app.clone();
             Arc::new(move |levels| utils::emit_levels(&app_handle, &levels))
         };
-        let on_audio: AudioFrameCallback = Arc::new(move |frame| stream_router.feed(frame));
+        let on_audio: AudioFrameCallback = Arc::new(move |frame| {
+            stream_router.feed(frame);
+            remote_preview_router.feed(frame);
+        });
 
         let manager = Self {
             state: Arc::new(Mutex::new(RecordingState::Idle)),

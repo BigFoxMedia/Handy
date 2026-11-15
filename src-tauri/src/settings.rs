@@ -512,6 +512,8 @@ pub struct AppSettings {
     pub post_process_selected_prompt_id: Option<String>,
     #[serde(default)]
     pub remote_transcription_enabled: bool,
+    #[serde(default)]
+    pub remote_transcription_streaming_enabled: bool,
     #[serde(default = "default_remote_transcription_provider_id")]
     pub remote_transcription_provider_id: String,
     #[serde(default = "default_remote_transcription_providers")]
@@ -1194,6 +1196,7 @@ pub fn get_default_settings() -> AppSettings {
         post_process_prompts: default_post_process_prompts(),
         post_process_selected_prompt_id: None,
         remote_transcription_enabled: false,
+        remote_transcription_streaming_enabled: false,
         remote_transcription_provider_id: default_remote_transcription_provider_id(),
         remote_transcription_providers: default_remote_transcription_providers(),
         remote_transcription_api_keys: default_remote_transcription_api_keys(),
@@ -1692,6 +1695,7 @@ mod remote_transcription_tests {
     fn remote_transcription_is_disabled_by_default() {
         let settings = get_default_settings();
         assert!(!settings.remote_transcription_enabled);
+        assert!(!settings.remote_transcription_streaming_enabled);
         assert_eq!(settings.remote_transcription_provider_id, "custom");
     }
 

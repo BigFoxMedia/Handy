@@ -1,5 +1,6 @@
 use crate::managers::audio::AudioRecordingManager;
 use crate::managers::transcription::TranscriptionManager;
+use crate::remote_stt::RemotePreviewManager;
 use crate::shortcut;
 use crate::TranscriptionCoordinator;
 use log::info;
@@ -234,6 +235,10 @@ pub fn cancel_current_operation(app: &AppHandle) {
     let tm = app.state::<Arc<TranscriptionManager>>();
     tm.cancel_stream();
     tm.cancel_transcription();
+
+    if let Some(preview) = app.try_state::<Arc<RemotePreviewManager>>() {
+        preview.cancel();
+    }
 
     // Update tray icon and hide overlay
     set_tray_state(app, crate::tray::TrayIconState::Idle);

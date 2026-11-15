@@ -42,6 +42,18 @@ pub fn change_remote_transcription_enabled_setting(
 
 #[tauri::command]
 #[specta::specta]
+pub fn change_remote_transcription_streaming_enabled_setting(
+    app: AppHandle,
+    enabled: bool,
+) -> Result<(), String> {
+    let mut settings = get_settings(&app);
+    settings.remote_transcription_streaming_enabled = enabled;
+    write_settings(&app, settings);
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
 pub fn set_remote_transcription_provider(
     app: AppHandle,
     provider_id: String,
